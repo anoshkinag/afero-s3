@@ -226,7 +226,28 @@ func (f *File) Read(p []byte) (int, error) {
 // ReadAt always returns a non-nil error when n < len(b).
 // At end of file, that error is io.EOF.
 func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
-	_, err = f.Seek(off, io.SeekStart)
+	if f.streamWrite != nil {
+		return 0, ErrNotSupported
+	}
+	if f.streamRead == nil {
+		return 0, afero.ErrFileClosed
+	}
+	_, err = f.seekRead(off, int64(len(p)), io.SeekStart)
+	if err != nil {
+		return
+	}
+	n, err = f.Read(p)
+	return
+}
+
+func (f *File) ReadAtWithSize(p []byte, off, size int64) (n int, err error) {
+	if f.streamWrite != nil {
+		return 0, ErrNotSupported
+	}
+	if f.streamRead == nil {
+		return 0, afero.ErrFileClosed
+	}
+	_, err = f.seekRead(off, size, io.SeekStart)
 	if err != nil {
 		return
 	}
@@ -244,26 +265,38 @@ func (f *File) Seek(offset int64, whence int) (int64, error) {
 	if f.streamWrite != nil {
 		return 0, ErrNotSupported
 	}
-
 	// Read seek has its own implementation
 	if f.streamRead != nil {
-		return f.seekRead(offset, whence)
+		return f.seekRead(offset, 0, whence)
 	}
 
 	// Not having a stream
 	return 0, afero.ErrFileClosed
 }
 
-func (f *File) seekRead(offset int64, whence int) (int64, error) {
-	startByte := int64(0)
+func (f *File) SeekWithSize(offset, size int64, whence int) (int64, error) {
+	// Write seek is not supported
+	if f.streamWrite != nil {
+		return 0, ErrNotSupported
+	}
+	// Read seek has its own implementation
+	if f.streamRead != nil {
+		return f.seekRead(offset, size, whence)
+	}
+	// Not having a stream
+	return 0, afero.ErrFileClosed
+}
+
+func (f *File) seekRead(off, size int64, whence int) (int64, error) {
+	offset := int64(0)
 
 	switch whence {
 	case io.SeekStart:
-		startByte = offset
+		offset = off
 	case io.SeekCurrent:
-		startByte = f.streamReadOffset + offset
+		offset = f.streamReadOffset + off
 	case io.SeekEnd:
-		startByte = f.cachedInfo.Size() - offset
+		offset = f.cachedInfo.Size() - off
 	}
 
 	if err := f.streamRead.Close(); err != nil {
@@ -271,11 +304,10 @@ func (f *File) seekRead(offset int64, whence int) (int64, error) {
 	}
 	f.streamRead = nil
 
-	if startByte < 0 {
-		return startByte, ErrInvalidSeek
+	if offset < 0 {
+		return offset, ErrInvalidSeek
 	}
-
-	return startByte, f.openReadStream(startByte)
+	return offset, f.openReadStream(offset, size)
 }
 
 // Write writes len(b) bytes to the File.
@@ -335,15 +367,21 @@ func (f *File) openWriteStream() error {
 	return nil
 }
 
-func (f *File) openReadStream(startAt int64) error {
+func (f *File) openReadStream(offset, size int64) error {
 	if f.streamRead != nil {
 		return ErrAlreadyOpened
 	}
 
 	var streamRange *string = nil
 
-	if startAt > 0 {
-		streamRange = aws.String(fmt.Sprintf("bytes=%d-%d", startAt, f.cachedInfo.Size()))
+	if offset > 0 || size > 0 {
+		end, objectSize := offset+size, f.cachedInfo.Size()
+		if size <= 0 {
+			end = objectSize
+		} else if end > objectSize {
+			end = objectSize
+		}
+		streamRange = aws.String(fmt.Sprintf("bytes=%d-%d", offset, end))
 	}
 
 	resp, err := f.fs.s3API.GetObject(&s3.GetObjectInput{
@@ -355,7 +393,7 @@ func (f *File) openReadStream(startAt int64) error {
 		return err
 	}
 
-	f.streamReadOffset = startAt
+	f.streamReadOffset = offset
 	f.streamRead = resp.Body
 	return nil
 }

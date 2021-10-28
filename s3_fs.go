@@ -116,8 +116,18 @@ func (fs *Fs) Open(name string) (afero.File, error) {
 	return fs.OpenFile(name, os.O_RDONLY, 0777)
 }
 
-// OpenFile opens a file.
-func (fs *Fs) OpenFile(name string, flag int, _ os.FileMode) (afero.File, error) {
+// OpenWithSize a file for reading with size.
+func (fs *Fs) OpenWithSize(name string, size int64) (afero.File, error) {
+	return fs.OpenFileWithSize(name, size, os.O_RDONLY, 0777)
+}
+
+// OpenFile opens a file .
+func (fs *Fs) OpenFile(name string, flag int, mode os.FileMode) (afero.File, error) {
+	return fs.OpenFileWithSize(name, 0, flag, mode)
+}
+
+// OpenFileWithSize opens a file with size.
+func (fs *Fs) OpenFileWithSize(name string, size int64, flag int, _ os.FileMode) (afero.File, error) {
 	file := NewFile(fs, name)
 
 	// Reading and writing is technically supported but can't lead to anything that makes sense
@@ -154,7 +164,7 @@ func (fs *Fs) OpenFile(name string, flag int, _ os.FileMode) (afero.File, error)
 		return file, nil
 	}
 
-	return file, file.openReadStream(0)
+	return file, file.openReadStream(0, size)
 }
 
 // Remove a file
