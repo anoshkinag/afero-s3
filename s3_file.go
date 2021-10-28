@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"os"
 	"path"
@@ -21,10 +22,11 @@ import (
 // File represents a file in S3.
 // nolint: maligned
 type File struct {
-	fs                       *Fs            // Parent file system
-	name                     string         // Name of the file
-	cachedInfo               os.FileInfo    // File info cached for later used
-	streamRead               io.ReadCloser  // streamRead is the underlying stream we are reading from
+	fs                       *Fs           // Parent file system
+	name                     string        // Name of the file
+	cachedInfo               os.FileInfo   // File info cached for later used
+	streamRead               io.ReadCloser // streamRead is the underlying stream we are reading from
+	minSeekSize              int64
 	streamReadOffset         int64          // streamReadOffset is the offset of the read-only stream
 	streamReadSize           int64          // streamReadSize is the size of the read-only stream
 	streamWrite              io.WriteCloser // streamWrite is the underlying stream we are reading to
@@ -45,6 +47,10 @@ func NewFile(fs *Fs, name string) *File {
 
 // Name returns the filename, i.e. S3 path without the bucket name.
 func (f *File) Name() string { return f.name }
+
+func (f *File) SetMinSeekSize(v int64) {
+	f.minSeekSize = v
+}
 
 // Readdir reads the contents of the directory associated with file and
 // returns a slice of up to n FileInfo values, as would be returned
@@ -294,7 +300,6 @@ func (f *File) SeekWithSize(offset, size int64, whence int) (int64, error) {
 
 func (f *File) seekRead(off, size int64, whence int) (int64, error) {
 	offset := int64(0)
-
 	switch whence {
 	case io.SeekStart:
 		offset = off
@@ -374,15 +379,14 @@ func (f *File) openReadStream(offset, size int64) error {
 	if f.streamRead != nil {
 		return ErrAlreadyOpened
 	}
-
 	var (
 		streamRange    *string = nil
 		streamReadSize int64
 	)
-
-	if offset > 0 || size > 0 {
-		end, objectSize := offset+size, f.cachedInfo.Size()
-		if size <= 0 {
+	seekSize := int64(math.Max(float64(f.minSeekSize), float64(size)))
+	if offset > 0 || seekSize > 0 {
+		end, objectSize := offset+seekSize, f.cachedInfo.Size()
+		if seekSize <= 0 {
 			end = objectSize
 		} else if end > objectSize {
 			end = objectSize
@@ -392,7 +396,6 @@ func (f *File) openReadStream(offset, size int64) error {
 	} else {
 		streamReadSize = f.cachedInfo.Size()
 	}
-
 	resp, err := f.fs.s3API.GetObject(&s3.GetObjectInput{
 		Bucket: aws.String(f.fs.bucket),
 		Key:    aws.String(f.name),
