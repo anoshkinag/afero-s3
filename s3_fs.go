@@ -116,25 +116,23 @@ func (fs *Fs) Open(name string) (afero.File, error) {
 	return fs.OpenFile(name, os.O_RDONLY, 0777)
 }
 
-// OpenWithSize a file for reading with size.
-func (fs *Fs) OpenWithSize(name string, size int64) (afero.File, error) {
-	return fs.OpenFileWithSize(name, size, os.O_RDONLY, 0777)
+// OpenWithRange a file for reading with size.
+func (fs *Fs) OpenWithRange(name string, offset, size int64) (afero.File, error) {
+	return fs.OpenFileWithRange(name, os.O_RDONLY, 0777, offset, size)
 }
 
 // OpenFile opens a file .
 func (fs *Fs) OpenFile(name string, flag int, mode os.FileMode) (afero.File, error) {
-	return fs.OpenFileWithSize(name, 0, flag, mode)
+	return fs.OpenFileWithRange(name, flag, mode, 0, 0)
 }
 
-// OpenFileWithSize opens a file with size.
-func (fs *Fs) OpenFileWithSize(name string, size int64, flag int, _ os.FileMode) (afero.File, error) {
+// OpenFileWithRange opens a file with size.
+func (fs *Fs) OpenFileWithRange(name string, flag int, _ os.FileMode, offset, size int64) (afero.File, error) {
 	file := NewFile(fs, name)
-
 	// Reading and writing is technically supported but can't lead to anything that makes sense
 	if flag&os.O_RDWR != 0 {
 		return nil, ErrNotSupported
 	}
-
 	// Appending is not supported by S3. It's do-able though by:
 	// - Copying the existing file to a new place (for example $file.previous)
 	// - Writing a new file, streaming the content of the previous file in it
@@ -143,28 +141,22 @@ func (fs *Fs) OpenFileWithSize(name string, size int64, flag int, _ os.FileMode)
 	if flag&os.O_APPEND != 0 {
 		return nil, ErrNotSupported
 	}
-
 	// Creating is basically a write
 	if flag&os.O_CREATE != 0 {
 		flag |= os.O_WRONLY
 	}
-
 	// We either write
 	if flag&os.O_WRONLY != 0 {
 		return file, file.openWriteStream()
 	}
-
 	info, err := file.Stat()
-
 	if err != nil {
 		return nil, err
 	}
-
 	if info.IsDir() {
 		return file, nil
 	}
-
-	return file, file.openReadStream(0, size)
+	return file, file.openReadStream(offset, size)
 }
 
 // Remove a file
