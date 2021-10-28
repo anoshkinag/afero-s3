@@ -26,6 +26,7 @@ type File struct {
 	cachedInfo               os.FileInfo    // File info cached for later used
 	streamRead               io.ReadCloser  // streamRead is the underlying stream we are reading from
 	streamReadOffset         int64          // streamReadOffset is the offset of the read-only stream
+	streamReadSize           int64          // streamReadSize is the size of the read-only stream
 	streamWrite              io.WriteCloser // streamWrite is the underlying stream we are reading to
 	streamWriteErr           error          // streamWriteErr is the error that should be returned in case of a write
 	streamWriteCloseErr      chan error     // streamWriteCloseErr is the channel containing the underlying write error
@@ -203,7 +204,6 @@ func (f *File) Close() error {
 		close(f.streamWriteCloseErr)
 		return err
 	}
-
 	// Or maybe we don't have anything to close
 	return nil
 }
@@ -212,12 +212,17 @@ func (f *File) Close() error {
 // It returns the number of bytes read and an error, if any.
 // EOF is signaled by a zero count with err set to io.EOF.
 func (f *File) Read(p []byte) (int, error) {
+	size := int64(len(p))
+	if (f.streamReadSize - size) < 1 {
+		if _, err := f.seekRead(f.streamReadOffset, size, io.SeekStart); err != nil {
+			return 0, err
+		}
+	}
 	n, err := f.streamRead.Read(p)
-
 	if err == nil {
 		f.streamReadOffset += int64(n)
+		f.streamReadSize -= int64(n)
 	}
-
 	return n, err
 }
 
@@ -298,12 +303,10 @@ func (f *File) seekRead(off, size int64, whence int) (int64, error) {
 	case io.SeekEnd:
 		offset = f.cachedInfo.Size() - off
 	}
-
 	if err := f.streamRead.Close(); err != nil {
 		return 0, fmt.Errorf("couldn't close previous stream: %w", err)
 	}
-	f.streamRead = nil
-
+	f.streamRead, f.streamReadSize = nil, 0
 	if offset < 0 {
 		return offset, ErrInvalidSeek
 	}
@@ -372,7 +375,10 @@ func (f *File) openReadStream(offset, size int64) error {
 		return ErrAlreadyOpened
 	}
 
-	var streamRange *string = nil
+	var (
+		streamRange    *string = nil
+		streamReadSize int64
+	)
 
 	if offset > 0 || size > 0 {
 		end, objectSize := offset+size, f.cachedInfo.Size()
@@ -382,6 +388,9 @@ func (f *File) openReadStream(offset, size int64) error {
 			end = objectSize
 		}
 		streamRange = aws.String(fmt.Sprintf("bytes=%d-%d", offset, end))
+		streamReadSize = end - offset
+	} else {
+		streamReadSize = f.cachedInfo.Size()
 	}
 
 	resp, err := f.fs.s3API.GetObject(&s3.GetObjectInput{
@@ -392,7 +401,7 @@ func (f *File) openReadStream(offset, size int64) error {
 	if err != nil {
 		return err
 	}
-
+	f.streamReadSize = streamReadSize
 	f.streamReadOffset = offset
 	f.streamRead = resp.Body
 	return nil
