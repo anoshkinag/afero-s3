@@ -218,12 +218,25 @@ func (f *File) Read(p []byte) (int, error) {
 			return 0, err
 		}
 	}
-	n, err := f.streamRead.Read(p)
-	if err == nil {
-		f.streamReadOffset += int64(n)
-		f.streamReadSize -= int64(n)
+	n := 0
+	for {
+		r, err := f.streamRead.Read(p[n:])
+		if r > 0 {
+			n += r
+		}
+		if err == nil {
+			f.streamReadOffset += int64(r)
+			f.streamReadSize -= int64(r)
+			if f.streamReadSize <= 0 {
+				break
+			}
+		} else if err == io.EOF {
+			break
+		} else if err != nil {
+			return n, err
+		}
 	}
-	return n, err
+	return n, nil
 }
 
 // ReadAt reads len(p) bytes from the file starting at byte offset off.
