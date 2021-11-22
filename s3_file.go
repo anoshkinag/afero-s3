@@ -213,7 +213,7 @@ func (f *File) Close() error {
 // EOF is signaled by a zero count with err set to io.EOF.
 func (f *File) Read(p []byte) (int, error) {
 	size := int64(len(p))
-	if f.streamReadSize != size {
+	if f.streamReadSize < 1 && size > 0 {
 		if _, err := f.seekRead(f.streamReadOffset, size, io.SeekStart); err != nil {
 			return 0, err
 		}
