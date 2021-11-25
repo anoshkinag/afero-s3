@@ -402,6 +402,9 @@ func (f *File) openReadStream(offset, size int64) error {
 	} else {
 		readSize = f.cachedInfo.Size()
 	}
+	if readSize <= 0 && offset > 0 && size > 0 {
+		return io.EOF
+	}
 	resp, err := f.fs.s3API.GetObject(&s3.GetObjectInput{
 		Bucket: aws.String(f.fs.bucket),
 		Key:    aws.String(f.name),
