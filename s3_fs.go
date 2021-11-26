@@ -259,13 +259,6 @@ func (fs Fs) Stat(name string) (os.FileInfo, error) {
 	} else if hasTrailingSlash(name) {
 		// user asked for a directory, but this is a file
 		return FileInfo{name: name}, nil
-		/*
-			return FileInfo{}, &os.PathError{
-				Op:   "stat",
-				Path: name,
-				Err:  os.ErrNotExist,
-			}
-		*/
 	}
 	return NewFileInfo(path.Base(name), false, *out.ContentLength, *out.LastModified), nil
 }
@@ -294,13 +287,10 @@ func (fs Fs) statDirectory(name string) (os.FileInfo, error) {
 	return NewFileInfo(path.Base(name), true, 0, time.Unix(0, 0)), nil
 }
 
-// Chmod doesn't exists in S3 but could be implemented by analyzing ACLs
+// Chmod doesn't exist in S3 but could be implemented by analyzing ACLs
 func (fs Fs) Chmod(name string, mode os.FileMode) error {
 	var acl string
-
-	otherRead := mode&(1<<2) != 0
-	otherWrite := mode&(1<<1) != 0
-
+	otherRead, otherWrite := mode&(1<<2) != 0, mode&(1<<1) != 0
 	switch {
 	case otherRead && otherWrite:
 		acl = "public-read-write"
@@ -309,7 +299,6 @@ func (fs Fs) Chmod(name string, mode os.FileMode) error {
 	default:
 		acl = "private"
 	}
-
 	_, err := fs.s3API.PutObjectAcl(&s3.PutObjectAclInput{
 		Bucket: aws.String(fs.bucket),
 		Key:    aws.String(name),
@@ -335,11 +324,9 @@ func applyFileCreateProps(req *s3.PutObjectInput, p *UploadedFileProperties) {
 	if p.ACL != nil {
 		req.ACL = p.ACL
 	}
-
 	if p.CacheControl != nil {
 		req.CacheControl = p.CacheControl
 	}
-
 	if p.ContentType != nil {
 		req.ContentType = p.ContentType
 	}
@@ -349,11 +336,9 @@ func applyFileWriteProps(req *s3manager.UploadInput, p *UploadedFileProperties) 
 	if p.ACL != nil {
 		req.ACL = p.ACL
 	}
-
 	if p.CacheControl != nil {
 		req.CacheControl = p.CacheControl
 	}
-
 	if p.ContentType != nil {
 		req.ContentType = p.ContentType
 	}

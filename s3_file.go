@@ -70,7 +70,6 @@ func (f *File) Readdir(n int) ([]os.FileInfo, error) {
 	// ListObjects treats leading slashes as part of the directory name
 	// It also needs a trailing slash to list contents of a directory.
 	name := trimLeadingSlash(f.Name()) // + "/"
-
 	// For the root of the bucket, we need to remove any prefix
 	if name != "" {
 		name += "/"
@@ -90,6 +89,7 @@ func (f *File) Readdir(n int) ([]os.FileInfo, error) {
 		f.readdirNotTruncated = true
 	}
 	var fis = make([]os.FileInfo, 0, len(output.CommonPrefixes)+len(output.Contents))
+	//goland:noinspection SpellCheckingInspection
 	for _, subfolder := range output.CommonPrefixes {
 		fis = append(fis, NewFileInfo(path.Base("/"+*subfolder.Prefix), true, 0, time.Unix(0, 0)))
 	}
@@ -98,10 +98,8 @@ func (f *File) Readdir(n int) ([]os.FileInfo, error) {
 			// S3 includes <name>/ in the Contents listing for <name>
 			continue
 		}
-
 		fis = append(fis, NewFileInfo(path.Base("/"+*fileObject.Key), false, *fileObject.Size, *fileObject.LastModified))
 	}
-
 	return fis, nil
 }
 
@@ -149,6 +147,9 @@ func (f *File) Readdirnames(n int) ([]string, error) {
 // Stat returns the FileInfo structure describing file.
 // If there is an error, it will be of type *PathError.
 func (f *File) Stat() (os.FileInfo, error) {
+	if f.cachedInfo != nil && f.streamRead != nil {
+		return f.cachedInfo, nil
+	}
 	info, err := f.fs.Stat(f.Name())
 	if err == nil {
 		f.cachedInfo = info
@@ -185,14 +186,12 @@ func (f *File) Close() error {
 		}()
 		return f.streamRead.Close()
 	}
-
 	// Closing a writing stream
 	if f.streamWrite != nil {
 		defer func() {
 			f.streamWrite = nil
 			f.streamWriteCloseErr = nil
 		}()
-
 		// We try to close the Writer
 		if err := f.streamWrite.Close(); err != nil {
 			return err
@@ -285,7 +284,6 @@ func (f *File) Seek(offset int64, whence int) (int64, error) {
 	if f.streamRead != nil {
 		return f.seekRead(offset, 0, whence)
 	}
-
 	// Not having a stream
 	return 0, afero.ErrFileClosed
 }
