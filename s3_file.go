@@ -224,14 +224,12 @@ func (f *File) Read(p []byte) (int, error) {
 		if r > 0 {
 			n += r
 		}
-		if err == nil {
+		if err == nil || err == io.EOF {
 			f.streamReadOffset += int64(r)
 			f.streamReadSize -= int64(r)
 			if f.streamReadSize <= 0 || n >= size {
 				break
 			}
-		} else if err == io.EOF {
-			break
 		} else if err != nil {
 			return n, err
 		}
