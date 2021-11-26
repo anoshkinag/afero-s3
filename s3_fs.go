@@ -16,15 +16,22 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/cornelk/hashmap"
 	"github.com/spf13/afero"
 )
 
+type CachedFilesInfo struct {
+	enable bool
+	m      hashmap.HashMap
+}
+
 // Fs is an FS object backed by S3.
 type Fs struct {
-	FileProps *UploadedFileProperties // FileProps define the file properties we want to set for all new files
-	bucket    string                  // Bucket name
-	session   *session.Session        // Session config
-	s3API     *s3.S3
+	FileProps  *UploadedFileProperties // FileProps define the file properties we want to set for all new files
+	bucket     string                  // Bucket name
+	session    *session.Session        // Session config
+	s3API      *s3.S3                  // S3 API
+	cachedInfo *CachedFilesInfo        // Cache for stat
 }
 
 // UploadedFileProperties defines all the set properties applied to future files
@@ -36,11 +43,11 @@ type UploadedFileProperties struct {
 
 // NewFs creates a new Fs object writing files to a given S3 bucket.
 func NewFs(bucket string, session *session.Session) *Fs {
-	s3Api := s3.New(session)
 	return &Fs{
-		bucket:  bucket,
-		session: session,
-		s3API:   s3Api,
+		s3API:      s3.New(session),
+		bucket:     bucket,
+		session:    session,
+		cachedInfo: new(CachedFilesInfo),
 	}
 }
 
@@ -56,38 +63,88 @@ var ErrAlreadyOpened = errors.New("already opened")
 // ErrInvalidSeek is returned when the seek operation is not doable
 var ErrInvalidSeek = errors.New("invalid seek offset")
 
+// HasKey check info by cache
+func (c CachedFilesInfo) HasKey(key string) bool {
+	if !c.enable {
+		return false
+	}
+	_, exist := c.m.Get(key)
+	return exist
+}
+
+// Get file info from cache
+func (c CachedFilesInfo) Get(key string) os.FileInfo {
+	if !c.enable {
+		return nil
+	}
+	i, exist := c.m.Get(key)
+	if !exist {
+		return nil
+	}
+	info, ok := i.(os.FileInfo)
+	if !ok {
+		return nil
+	}
+	return info
+}
+
+// Set file info by key
+func (c CachedFilesInfo) Set(key string, info os.FileInfo) os.FileInfo {
+	if !c.enable {
+		return info
+	}
+	if info != nil {
+		c.m.Set(key, info)
+	} else {
+		c.m.Del(key)
+	}
+	return info
+}
+
+// Del file info by key
+func (c CachedFilesInfo) Del(key string) {
+	c.m.Del(key)
+}
+
 // Name returns the type of FS object this is: Fs.
 func (Fs) Name() string { return "s3" }
 
+// SetEnableCachedInfo ...
+func (fs Fs) SetEnableCachedInfo(v bool) {
+	if fs.cachedInfo != nil {
+		fs.cachedInfo.enable = v
+	}
+}
+
 // Create a file.
 func (fs Fs) Create(name string) (afero.File, error) {
-	{ // It's faster to trigger an explicit empty put object than opening a file for write, closing it and re-opening it
+	// Clear info by old cache
+	if fs.cachedInfo != nil {
+		fs.cachedInfo.Del(name)
+	}
+	// It's faster to trigger an explicit empty put object than opening a file for write, closing it and re-opening it
+	{
 		req := &s3.PutObjectInput{
 			Bucket: aws.String(fs.bucket),
 			Key:    aws.String(name),
 			Body:   bytes.NewReader([]byte{}),
 		}
-
 		if fs.FileProps != nil {
 			applyFileCreateProps(req, fs.FileProps)
 		}
-
 		// If no Content-Type was specified, we'll guess one
 		if req.ContentType == nil {
 			req.ContentType = aws.String(mime.TypeByExtension(filepath.Ext(name)))
 		}
-
-		_, errPut := fs.s3API.PutObject(req)
-		if errPut != nil {
-			return nil, errPut
+		_, err := fs.s3API.PutObject(req)
+		if err != nil {
+			return nil, err
 		}
 	}
-
 	file, err := fs.OpenFile(name, os.O_WRONLY, 0750)
 	if err != nil {
 		return file, err
 	}
-
 	// Create(), like all of S3, is eventually consistent.
 	// To protect against unexpected behavior, have this method
 	// wait until S3 reports the object exists.
@@ -169,6 +226,9 @@ func (fs Fs) Remove(name string) error {
 
 // forceRemove doesn't error if a file does not exist.
 func (fs Fs) forceRemove(name string) error {
+	if fs.cachedInfo != nil {
+		fs.cachedInfo.Del(name)
+	}
 	_, err := fs.s3API.DeleteObject(&s3.DeleteObjectInput{
 		Bucket: aws.String(fs.bucket),
 		Key:    aws.String(name),
@@ -210,6 +270,10 @@ func (fs Fs) Rename(oldname, newname string) error {
 	if oldname == newname {
 		return nil
 	}
+	if fs.cachedInfo != nil {
+		fs.cachedInfo.Del(oldname)
+		fs.cachedInfo.Del(newname)
+	}
 	_, err := fs.s3API.CopyObject(&s3.CopyObjectInput{
 		Bucket:     aws.String(fs.bucket),
 		CopySource: aws.String(fs.bucket + oldname),
@@ -239,6 +303,9 @@ func trimLeadingSlash(s string) string {
 // Stat returns a FileInfo describing the named file.
 // If there is an error, it will be of type *os.PathError.
 func (fs Fs) Stat(name string) (os.FileInfo, error) {
+	if fs.cachedInfo != nil && fs.cachedInfo.HasKey(name) {
+		return fs.cachedInfo.Get(name), nil
+	}
 	out, err := fs.s3API.HeadObject(&s3.HeadObjectInput{
 		Bucket: aws.String(fs.bucket),
 		Key:    aws.String(name),
@@ -260,7 +327,11 @@ func (fs Fs) Stat(name string) (os.FileInfo, error) {
 		// user asked for a directory, but this is a file
 		return FileInfo{name: name}, nil
 	}
-	return NewFileInfo(path.Base(name), false, *out.ContentLength, *out.LastModified), nil
+	info := NewFileInfo(path.Base(name), false, *out.ContentLength, *out.LastModified)
+	if fs.cachedInfo != nil {
+		return fs.cachedInfo.Set(name, info), nil
+	}
+	return info, nil
 }
 
 func (fs Fs) statDirectory(name string) (os.FileInfo, error) {
@@ -298,6 +369,9 @@ func (fs Fs) Chmod(name string, mode os.FileMode) error {
 		acl = "public-read"
 	default:
 		acl = "private"
+	}
+	if fs.cachedInfo != nil {
+		fs.cachedInfo.Del(name)
 	}
 	_, err := fs.s3API.PutObjectAcl(&s3.PutObjectAclInput{
 		Bucket: aws.String(fs.bucket),

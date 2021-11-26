@@ -147,9 +147,6 @@ func (f *File) Readdirnames(n int) ([]string, error) {
 // Stat returns the FileInfo structure describing file.
 // If there is an error, it will be of type *PathError.
 func (f *File) Stat() (os.FileInfo, error) {
-	if f.cachedInfo != nil && f.streamRead != nil {
-		return f.cachedInfo, nil
-	}
 	info, err := f.fs.Stat(f.Name())
 	if err == nil {
 		f.cachedInfo = info
@@ -178,6 +175,8 @@ func (f *File) WriteString(s string) (int, error) {
 // Close closes the File, rendering it unusable for I/O.
 // It returns an error, if any.
 func (f *File) Close() error {
+	// Delete info from cache
+	f.fs.cachedInfo.Del(f.name)
 	// Closing a reading stream
 	if f.streamRead != nil {
 		// We try to close the Reader
@@ -326,13 +325,11 @@ func (f *File) seekRead(off, size int64, whence int) (int64, error) {
 // Write returns a non-nil error when n != len(b).
 func (f *File) Write(p []byte) (int, error) {
 	n, err := f.streamWrite.Write(p)
-
 	// If we have an error, it's only the "read/write on closed pipe" and we
 	// should report the underlying one
 	if err != nil {
 		return 0, f.streamWriteErr
 	}
-
 	return n, err
 }
 
@@ -340,7 +337,6 @@ func (f *File) openWriteStream() error {
 	if f.streamWrite != nil {
 		return ErrAlreadyOpened
 	}
-
 	reader, writer := io.Pipe()
 
 	f.streamWriteCloseErr = make(chan error)
@@ -355,23 +351,18 @@ func (f *File) openWriteStream() error {
 			Key:    aws.String(f.name),
 			Body:   reader,
 		}
-
 		if f.fs.FileProps != nil {
 			applyFileWriteProps(input, f.fs.FileProps)
 		}
-
 		// If no Content-Type was specified, we'll guess one
 		if input.ContentType == nil {
 			input.ContentType = aws.String(mime.TypeByExtension(filepath.Ext(f.name)))
 		}
-
 		_, err := uploader.Upload(input)
-
 		if err != nil {
 			f.streamWriteErr = err
 			_ = f.streamWrite.Close()
 		}
-
 		f.streamWriteCloseErr <- err
 		// close(f.streamWriteCloseErr)
 	}()
