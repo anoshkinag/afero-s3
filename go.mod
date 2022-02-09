@@ -3,9 +3,9 @@ module github.com/legion-zver/afero-s3
 go 1.17
 
 require (
-	github.com/aws/aws-sdk-go v1.42.12
+	github.com/aws/aws-sdk-go v1.42.49
 	github.com/cornelk/hashmap v1.0.1
-	github.com/spf13/afero v1.6.0
+	github.com/spf13/afero v1.8.1
 	github.com/stretchr/testify v1.7.0
 )
 
