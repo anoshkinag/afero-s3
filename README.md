@@ -1,11 +1,5 @@
 # S3 Backend for Afero
 
-![Build](https://github.com/fclairamb/afero-s3/workflows/Build/badge.svg)
-[![codecov](https://codecov.io/gh/fclairamb/afero-s3/branch/master/graph/badge.svg?token=OZ2WZ969O5)](https://codecov.io/gh/fclairamb/afero-s3)
-[![Go Report Card](https://goreportcard.com/badge/fclairamb/afero-s3)](https://goreportcard.com/report/fclairamb/afero-s3)
-[![GoDoc](https://godoc.org/github.com/fclairamb/afero-s3?status.svg)](https://godoc.org/github.com/fclairamb/afero-s3)
-
-
 ## About
 It provides an [afero filesystem](https://github.com/spf13/afero/) implementation of an [S3](https://aws.amazon.com/s3/) backend.
 
@@ -34,7 +28,7 @@ import(
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
   
-	s3 "github.com/fclairamb/afero-s3"
+	s3 "github.com/legion-zver/afero-s3"
 )
 
 func main() {
@@ -57,6 +51,7 @@ func main() {
 ## Thanks
 
 The initial code (which was massively rewritten) comes from:
+- [fclairamb's fork](https://github.com/fclairamb/afero-s3)
 - [wreulicke's fork](https://github.com/wreulicke/afero-s3)
 - Itself forked from [aviau's fork](https://github.com/aviau/).
 - Initially proposed as [an afero PR](https://github.com/spf13/afero/pull/90) by [rgarcia](https://github.com/rgarcia) and updated by [aviau](https://github.com/aviau).

@@ -327,7 +327,7 @@ func (fs Fs) Stat(name string) (os.FileInfo, error) {
 		// user asked for a directory, but this is a file
 		return FileInfo{name: name}, nil
 	}
-	info := NewFileInfo(path.Base(name), false, *out.ContentLength, *out.LastModified)
+	info := NewFileInfo(path.Base(name), false, aws.Int64Value(out.ContentLength), aws.TimeValue(out.LastModified))
 	if fs.cachedInfo != nil {
 		return fs.cachedInfo.Set(name, info), nil
 	}
@@ -348,7 +348,7 @@ func (fs Fs) statDirectory(name string) (os.FileInfo, error) {
 			Err:  err,
 		}
 	}
-	if *out.KeyCount == 0 && name != "" {
+	if aws.Int64Value(out.KeyCount) == 0 && name != "" {
 		return nil, &os.PathError{
 			Op:   "stat",
 			Path: name,

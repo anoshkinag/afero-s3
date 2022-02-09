@@ -85,20 +85,25 @@ func (f *File) Readdir(n int) ([]os.FileInfo, error) {
 		return nil, err
 	}
 	f.readdirContinuationToken = output.NextContinuationToken
-	if !(*output.IsTruncated) {
+	if !(aws.BoolValue(output.IsTruncated)) {
 		f.readdirNotTruncated = true
 	}
 	var fis = make([]os.FileInfo, 0, len(output.CommonPrefixes)+len(output.Contents))
 	//goland:noinspection SpellCheckingInspection
 	for _, subfolder := range output.CommonPrefixes {
-		fis = append(fis, NewFileInfo(path.Base("/"+*subfolder.Prefix), true, 0, time.Unix(0, 0)))
+		fis = append(fis, NewFileInfo(path.Base("/"+aws.StringValue(subfolder.Prefix)), true, 0, time.Unix(0, 0)))
 	}
 	for _, fileObject := range output.Contents {
-		if hasTrailingSlash(*fileObject.Key) {
+		if hasTrailingSlash(aws.StringValue(fileObject.Key)) {
 			// S3 includes <name>/ in the Contents listing for <name>
 			continue
 		}
-		fis = append(fis, NewFileInfo(path.Base("/"+*fileObject.Key), false, *fileObject.Size, *fileObject.LastModified))
+		fis = append(fis, NewFileInfo(
+			path.Base("/"+aws.StringValue(fileObject.Key)),
+			false,
+			aws.Int64Value(fileObject.Size),
+			aws.TimeValue(fileObject.LastModified)),
+		)
 	}
 	return fis, nil
 }
