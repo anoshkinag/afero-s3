@@ -183,9 +183,26 @@ func (fs *Fs) OpenFile(name string, flag int, mode os.FileMode) (afero.File, err
 	return fs.OpenFileWithRange(name, flag, mode, 0, 0)
 }
 
+func (fs *Fs) applyRightToFileProp(mode os.FileMode) {
+	otherRead, otherWrite := mode&(1<<2) != 0, mode&(1<<1) != 0
+	if fs.FileProps==nil{
+		fs.FileProps=&UploadedFileProperties{}
+	}
+	switch {
+	case otherRead && otherWrite:
+		fs.FileProps.ACL=aws.String("public-read-write")
+	case otherRead:
+		fs.FileProps.ACL=aws.String("public-read")
+	}
+}
+
 // OpenFileWithRange opens a file with size.
-func (fs *Fs) OpenFileWithRange(name string, flag int, _ os.FileMode, offset, size int64) (afero.File, error) {
+func (fs *Fs) OpenFileWithRange(name string, flag int, mode os.FileMode, offset, size int64) (afero.File, error) {
 	file := NewFile(fs, name)
+
+	//Apply ACL
+	fs.applyRightToFileProp(mode)
+
 	// Reading and writing is technically supported but can't lead to anything that makes sense
 	if flag&os.O_RDWR != 0 {
 		return nil, ErrNotSupported
